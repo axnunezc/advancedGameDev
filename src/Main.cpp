@@ -1,14 +1,14 @@
 #include "SDL_Manager.hpp"
-#include "Shape.hpp"
 #include "Shader.hpp"
 #include "Engine.hpp"
-#include "GameObjectManager.hpp"
+#include "Renderer.hpp"
 #include "GameObject.hpp"
+#include "RotatingCube.hpp"
+#include "SoundSystem.hpp"
 #include <iostream>
 #include <vector>
-#include <fstream>
-#include <chrono>
-#include <thread>
+#include <thread> 
+#include <chrono> 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
@@ -25,90 +25,53 @@ bool initOpenGL() {
         return false;
     }
     glEnable(GL_DEPTH_TEST);
+    glEnable(GL_CULL_FACE);
+    glCullFace(GL_BACK);
+    glFrontFace(GL_CCW);
     return true;
 }
 
 int main(int argc, char** argv) {
     Engine::initialize();
-
     SDL_Manager& sdl = SDL_Manager::sdl();
     sdl.spawnWindow("OpenGL Cube", 800, 600, SDL_TRUE);
 
-    if (!initOpenGL()) {
-        return EXIT_FAILURE;
-    }
+    if (!initOpenGL()) return EXIT_FAILURE;
 
     Shader shader("../shader.vert", "../shader.frag");
+    Renderer renderer;
+    SoundSystem soundSystem;
 
-    std::vector<float> vertexData;
+    // Load and play the initial sound
+    int soundIndex = soundSystem.loadSound("../audio/hit.wav");
+    std::cout << "Loaded sound index: " << soundIndex << std::endl;
+    if (soundIndex == -1) {
+        std::cerr << "Failed to load initial sound.\n";
+    } else {
+        std::cout << "Playing initial sound..." << std::endl;
+        soundSystem.playSound(soundIndex);
+    }
+
+    // Load mesh
     size_t triangleCount;
-    Shape* cubeShape = nullptr;
+    std::vector<float> vertexData;
+    if (!loadMeshData("../mesh.cse", triangleCount, vertexData)) return EXIT_FAILURE;
 
-    if (!Shape::loadMeshData("../mesh.cse", triangleCount, vertexData)) {
-        return EXIT_FAILURE;
-    }
+    Shape cubeShape(triangleCount, vertexData);
 
-    Shape testObj(triangleCount, vertexData);
+    // Create a RotatingCube with a rotation speed and axis
+    RotatingCube cube(
+        glm::vec3(0.0f, 0.0f, 0.0f),    // Position
+        Quaternion(60.0f, glm::vec3(0.5f, 0.0f, 1.0f)), // Initial rotation
+        cubeShape,                       // Shape
+        1,                                // ID
+        glm::vec3(0.5f, 0.0f, 1.0f),      // Rotation Axis
+        90.0f                             // Rotation Speed (Degrees per second)
+    );    
 
-    glm::mat4 model = glm::rotate(glm::mat4(1.0f), glm::radians(60.0f), glm::normalize(glm::vec3(0.5f, 0.0f, 1.0f))); // Place cube at origin
-    glm::mat4 view = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -10.0f)); // Move camera further back
+    // Projection and View Matrices
+    glm::mat4 view = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -10.0f));
     glm::mat4 proj = glm::perspective(glm::radians(60.0f), 800.0f / 600.0f, 0.1f, 100.0f);
-    // glm::mat4 mvp = proj * view * model;
-    GLint projLoc = shader.getUniform("proj");
-    GLint modelLoc = shader.getUniform("model");
-    GLint viewLoc = shader.getUniform("view");
-
-    cubeShape = new Shape(triangleCount, vertexData);
-
-    GameObjectManager virtualGameObjects;
-    virtualGameObjects.addObject(new Cube(glm::vec3(0.0f, 0.0f, 0.0f), Quat(glm::vec3(0, 1, 0), 0.0f), cubeShape));
-
-    GameObjectManager functionPtrGameObjects;
-
-    Cube_FnPtr* cubeFnPtr = new Cube_FnPtr(glm::vec3(0.0f, 0.0f, 0.0f), Quat(glm::vec3(0, 1, 0), 0.0f), cubeShape);
-    cubeFnPtr->setUpdateFunction(cubeUpdateFunction);  // Ensure the function pointer is set
-
-    functionPtrGameObjects.addObject(cubeFnPtr);
-
-    std::vector<double> virtualTimes;
-    for (int i = 0; i < 10000; ++i) {
-        auto start = std::chrono::high_resolution_clock::now();
-        virtualGameObjects.updateAll(0.016f);
-        auto end = std::chrono::high_resolution_clock::now();
-        virtualTimes.push_back(std::chrono::duration<double, std::micro>(end - start).count());
-    }
-
-    std::vector<double> functionPtrTimes;
-    for (int i = 0; i < 10000; ++i) {
-        auto start = std::chrono::high_resolution_clock::now();
-        functionPtrGameObjects.updateAll(0.016f);
-        auto end = std::chrono::high_resolution_clock::now();
-        functionPtrTimes.push_back(std::chrono::duration<double, std::micro>(end - start).count());
-    }
-
-    std::ofstream virtualFile("benchmark_virtual.csv");
-    if (virtualFile.is_open()) {
-        virtualFile << "Iteration,Update Time (µs)\n";
-        for (size_t i = 0; i < virtualTimes.size(); ++i) {
-            virtualFile << i << "," << virtualTimes[i] << "\n";
-        }
-        virtualFile.close();
-        std::cout << "Virtual function benchmark results saved to benchmark_virtual.csv\n";
-    } else {
-        std::cerr << "Error: Could not open benchmark_virtual.csv for writing\n";
-    }
-
-    std::ofstream functionPtrFile("benchmark_function_ptr.csv");
-    if (functionPtrFile.is_open()) {
-        functionPtrFile << "Iteration,Update Time (µs)\n";
-        for (size_t i = 0; i < functionPtrTimes.size(); ++i) {
-            functionPtrFile << i << "," << functionPtrTimes[i] << "\n";
-        }
-        functionPtrFile.close();
-        std::cout << "Function pointer benchmark results saved to benchmark_function_ptr.csv\n";
-    } else {
-        std::cerr << "Error: Could not open benchmark_function_ptr.csv for writing\n";
-    }
 
     bool exit = false;
     SDL_Event e;
@@ -116,52 +79,30 @@ int main(int argc, char** argv) {
     while (!exit) {
         Engine::update();
         float dtSeconds = Engine::getDeltaSeconds();
+        
+        // Clean up completed sounds to prevent memory issues
+        soundSystem.cleanup();
+        
+        cube.update(dtSeconds);
+        renderer.submit(&cube);
 
         while (SDL_PollEvent(&e)) {
-            if (e.type == SDL_QUIT) {
-                exit = true;
-            }
-            if (e.type == SDL_WINDOWEVENT) {
-                if (e.window.event == SDL_WINDOWEVENT_CLOSE) {
-                    sdl.closeWindow(e.window.windowID);
-                }
+            if (e.type == SDL_QUIT) exit = true;
+            if (e.type == SDL_WINDOWEVENT && e.window.event == SDL_WINDOWEVENT_CLOSE) {
+                sdl.closeWindow(e.window.windowID);
             }
             if (e.type == SDL_KEYDOWN) {
-                if (e.key.keysym.sym == SDLK_ESCAPE) {
-                    exit = true;
+                if (e.key.keysym.sym == SDLK_SPACE) {
+                    std::cout << "Playing sound on SPACEBAR press...\n";
+                    soundSystem.playSound(soundIndex);  // Play the loaded sound
                 }
             }
         }
 
-        virtualGameObjects.updateAll(dtSeconds);
-        functionPtrGameObjects.updateAll(dtSeconds);
-
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-        shader.use();
-
-        glUniformMatrix4fv(projLoc, 1, GL_FALSE, glm::value_ptr(proj));
-        glUniformMatrix4fv(viewLoc, 1, GL_FALSE, glm::value_ptr(view));
-        glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
-
-        glBindVertexArray(testObj.getVAO());
-        glBindBuffer(GL_ARRAY_BUFFER, testObj.getVBO());
-
-        glDrawArrays(GL_TRIANGLES, 0, testObj.getVertexCount());
-
-        glBindBuffer(GL_ARRAY_BUFFER, 0);
-        glBindVertexArray(0);
-
-        // for (size_t i = 0; i < virtualGameObjects.getCount(); ++i) {
-        //     GameObject* obj = virtualGameObjects.getObject(i);
-        //     if (obj) {
-        //         glm::mat4 model = obj->getModel();
-        //         glUniformMatrix4fv(shader.getUniform("model"), 1, GL_FALSE, glm::value_ptr(model));
-        //         obj->draw();
-        //     }
-        // }
-
+        renderer.render(shader, view, proj);
         sdl.updateWindows();
-        // std::this_thread::sleep_for(1ms);
+        std::this_thread::sleep_for(1ms);
     }
 
     return 0;

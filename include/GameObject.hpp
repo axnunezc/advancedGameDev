@@ -1,61 +1,35 @@
 #ifndef GAMEOBJECT_HPP
 #define GAMEOBJECT_HPP
 
-#include "Quat.hpp"
+#include "Quaternion.hpp"
 #include "Shape.hpp"
-#include <functional>
-#include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
 
 class GameObject {
 protected:
     glm::vec3 position;
-    Quat rotation;
-    Shape* shape;
-    glm::vec3 linearV;
-    glm::vec3 angularV;
+    Quaternion rotation;
+    glm::mat4 modelMatrix;
+
+private:
+    Shape renderElementShape;
+    glm::vec3 linearVelocity;
+    glm::vec3 angularVelocity;
+    int renderElement; 
 
 public:
-    std::function<void(GameObject*, float)> updateFunc;
+    GameObject(glm::vec3 pos, Quaternion rot, const Shape& shape, int id);
 
-    GameObject(const glm::vec3& pos, const Quat& rot, Shape* mesh);
-    virtual ~GameObject();
+    virtual ~GameObject() = default;
 
-    virtual void update(float dt) = 0;
-    void updateViaFunction(float dt);
-    glm::mat4 getModel() const;
-    void integrateVelocity(float dt);
-    void draw() const;
-    void setAngularVelocity(const glm::vec3& velocity);
+    // Virtual function for update logic
+    virtual void update(float deltaTime) = 0;
+    glm::mat4 getModelMatrix() const { return modelMatrix; }
 
-    virtual Quat getRotation() const { return rotation; }
-    virtual void setRotation(const Quat& rot) { rotation = rot; }
+    int getRenderElement() const { return renderElement; }
+
+    GLuint getVAO() const { return renderElementShape.getVAO(); }
+    GLuint getVBO() const { return renderElementShape.getVBO(); }
+    size_t getVertexCount() const { return renderElementShape.getVertexCount(); }
 };
-
-class Cube : public GameObject {
-public:
-    Cube(const glm::vec3& pos, const Quat& rot, Shape* mesh);
-    void update(float dt) override;
-};
-
-void cubeUpdate(GameObject* obj, float dt);
-
-class Cube_FnPtr : public GameObject {
-public:
-    void (*updateFn)(GameObject*, float);  // Function pointer for update behavior
-
-    Cube_FnPtr(const glm::vec3& pos, const Quat& rot, Shape* shape)
-        : GameObject(pos, rot, shape), updateFn(nullptr) {}
-
-    void setUpdateFunction(void (*fn)(GameObject*, float)) {
-        updateFn = fn;
-    }
-
-    void update(float dt) override {
-        if (updateFn) updateFn(this, dt);
-    }
-};
-
-void cubeUpdateFunction(GameObject* obj, float dt);
 
 #endif

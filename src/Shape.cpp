@@ -1,5 +1,7 @@
 #include "Shape.hpp"
 #include <iostream>
+#include <vector>
+#include <algorithm>
 #include <fstream>
 
 Shape::Shape(const size_t triangleCount, const std::vector<float>& vertexData) {
@@ -50,22 +52,12 @@ Shape::Shape(const size_t triangleCount, const std::vector<float>& vertexData) {
 Shape::~Shape() {
     glDeleteVertexArrays(1, &vao);
     glDeleteBuffers(1, &vbo);
-    std::cout << "Shape destroyed." << std::endl;
+    vao = 0;
+    vbo = 0;
+    std::cout << "Shape destroyed, OpenGL buffers deleted." << std::endl;
 }
 
-void Shape::bind() const {
-    glBindVertexArray(vao);
-}
-
-void Shape::unbind() const {
-    glBindVertexArray(0);
-}
-
-size_t Shape::getVertexCount() const {
-    return vertexCount;
-}
-
-bool Shape::loadMeshData(const std::string& filename, size_t& triangleCount, std::vector<float>& vertexData) {
+bool loadMeshData(const std::string& filename, size_t& triangleCount, std::vector<float>& vertexData) {
     std::ifstream input(filename);
     if (!input.is_open()) {
         std::cerr << "Error: Could not open mesh file " << filename << std::endl;
@@ -74,16 +66,18 @@ bool Shape::loadMeshData(const std::string& filename, size_t& triangleCount, std
 
     std::string line;
     
+    // Read number of triangles
     if (!std::getline(input, line)) {
         std::cerr << "Error: File format incorrect!" << std::endl;
         return false;
     }
     triangleCount = std::stoi(line);
 
+    // Read vertex positions first
     for (size_t i = 0; i < triangleCount * 3; ++i) {
         float x, y, z;
         if (!(input >> x >> y >> z)) {
-            std::cerr << "Error: Invalid vertex data!" << std::endl;
+            std::cerr << "Error: Invalid vertex position data!" << std::endl;
             return false;
         }
         vertexData.push_back(x);
@@ -91,6 +85,7 @@ bool Shape::loadMeshData(const std::string& filename, size_t& triangleCount, std
         vertexData.push_back(z);
     }
 
+    // Read normal vectors next
     for (size_t i = 0; i < triangleCount * 3; ++i) {
         float nx, ny, nz;
         if (!(input >> nx >> ny >> nz)) {
@@ -103,5 +98,6 @@ bool Shape::loadMeshData(const std::string& filename, size_t& triangleCount, std
     }
 
     input.close();
+    std::cout << "Loaded " << triangleCount << " triangles from " << filename << std::endl;
     return true;
 }

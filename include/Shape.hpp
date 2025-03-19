@@ -19,7 +19,7 @@ public:
 
     void bind() const;
     void unbind() const;
-    size_t getVertexCount() const;
+    GLsizei getVertexCount() const { return static_cast<GLsizei>(pos.size()); }
 
     GLuint getVAO() const {
         return vao;
@@ -28,8 +28,8 @@ public:
     GLuint getVBO() const {
         return vbo;
     }
-
-    static bool loadMeshData(const std::string& filename, size_t& triangleCount, std::vector<float>& vertexData);
 };
+
+bool loadMeshData(const std::string& filename, size_t& triangleCount, std::vector<float>& vertexData);
 
 #endif
