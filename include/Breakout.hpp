@@ -92,7 +92,7 @@ private:
 public:
     Paddle(const glm::vec3& pos, float width, float height, const Shape& shape, int id);
     
-    void update(float deltaTime) override;
+    void update(float deltaTime);
     void moveLeft(float dt);
     void moveRight(float dt);
     
@@ -122,7 +122,7 @@ private:
 public:
     Ball(const glm::vec3& pos, float radius, const Shape& shape, int id);
     
-    void update(float deltaTime) override;
+    void update(float deltaTime);
     
     // Ball control
     void launch();
@@ -156,7 +156,7 @@ private:
 public:
     Brick(const glm::vec3& pos, float width, float height, int hitPoints, int scoreValue, const Shape& shape, int id);
     
-    void update(float deltaTime) override;
+    void update(float deltaTime);
     
     // Collision detection
     bool intersects(const Ball& ball) const;

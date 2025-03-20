@@ -10,17 +10,22 @@ private:
 
 public:
     RotatingCube(glm::vec3 pos, Quaternion rot, const Shape& shape, int id, glm::vec3 axis, float speed)
-        : GameObject(pos, rot, shape, id), rotationAxis(glm::normalize(axis)), rotationSpeed(speed) {}
+        : GameObject(pos, rot, shape, id), rotationAxis(glm::normalize(axis)), rotationSpeed(speed) 
+    {
+        // Set custom update function for this type
+        setUpdateFunction(&RotatingCube::customUpdate);
+    }
 
-    void update(float deltaTime) override {
-        // // Accumulate rotation
-        // float angleIncrement = deltaTime * 60.0f;  // Rotate based on elapsed time
-        // rotation = Quaternion(angleIncrement, rotation.getAxis()) * rotation; // Apply incremental rotation
-        // rotation.normalize(); // Keep it unit length
-
-        // // Update the model matrix with the new rotation
-        // modelMatrix = glm::translate(glm::mat4(1.0f), position) *
-        //             glm::rotate(glm::mat4(1.0f), glm::radians(rotation.getAngle()), rotation.getAxis());
+    // Static update function for RotatingCube objects
+    static void customUpdate(GameObject* obj, float deltaTime) {
+        // Need to cast to RotatingCube to access specific members
+        RotatingCube* cube = static_cast<RotatingCube*>(obj);
+        
+        // Apply rotation based on rotationAxis and rotationSpeed
+        float angle = cube->rotationSpeed * deltaTime;
+        
+        cube->modelMatrix = glm::translate(glm::mat4(1.0f), cube->position) *
+                           glm::rotate(glm::mat4(1.0f), glm::radians(angle), cube->rotationAxis);
     }
 };
 
