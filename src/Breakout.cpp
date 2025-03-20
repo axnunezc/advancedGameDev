@@ -5,26 +5,23 @@
 
 // Shape creation helper functions
 Shape createQuadShape() {
-    // Simple quad - just positions, no normals
-    std::vector<float> vertexData = {
-        // First triangle - positions
-        -0.5f, -0.5f, 0.0f,
-         0.5f, -0.5f, 0.0f,
-         0.5f,  0.5f, 0.0f,
-        // First triangle - normals
-        0.0f, 0.0f, 1.0f,
-        0.0f, 0.0f, 1.0f,
-        0.0f, 0.0f, 1.0f,
-        
-        // Second triangle - positions
-        -0.5f, -0.5f, 0.0f,
-         0.5f,  0.5f, 0.0f,
-        -0.5f,  0.5f, 0.0f,
-        // Second triangle - normals
-        0.0f, 0.0f, 1.0f,
-        0.0f, 0.0f, 1.0f,
-        0.0f, 0.0f, 1.0f
-    };
+    // Quad vertices data (all positions first, then all normals)
+    std::vector<float> vertexData;
+    
+    // First triangle - positions
+    vertexData.push_back(-0.5f); vertexData.push_back(-0.5f); vertexData.push_back(0.0f);
+    vertexData.push_back(0.5f);  vertexData.push_back(-0.5f); vertexData.push_back(0.0f);
+    vertexData.push_back(0.5f);  vertexData.push_back(0.5f);  vertexData.push_back(0.0f);
+    
+    // Second triangle - positions
+    vertexData.push_back(-0.5f); vertexData.push_back(-0.5f); vertexData.push_back(0.0f);
+    vertexData.push_back(0.5f);  vertexData.push_back(0.5f);  vertexData.push_back(0.0f);
+    vertexData.push_back(-0.5f); vertexData.push_back(0.5f);  vertexData.push_back(0.0f);
+    
+    // Now add all normals (6 vertices)
+    for (int i = 0; i < 6; i++) {
+        vertexData.push_back(0.0f); vertexData.push_back(0.0f); vertexData.push_back(1.0f);
+    }
     
     return Shape(2, vertexData); // 2 triangles
 }
