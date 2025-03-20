@@ -2,11 +2,9 @@
 #include "Shader.hpp"
 #include "Engine.hpp"
 #include "Renderer.hpp"
-#include "GameObject.hpp"
-#include "RotatingCube.hpp"
 #include "SoundSystem.hpp"
-#include "SceneGraph.hpp"
 #include "Camera.hpp"
+#include "Breakout.hpp"
 #include <iostream>
 #include <vector>
 #include <thread> 
@@ -33,147 +31,157 @@ bool initOpenGL() {
     return true;
 }
 
+// Render text - simplified version that just prints to console
+void renderText(const std::string& text, float x, float y, float scale) {
+    // In a real implementation, you'd use SDL_ttf or another text rendering solution
+    // For now, just print to console
+    std::cout << text << std::endl;
+}
+
 int main(int argc, char** argv) {
+    // Initialize engine components
     Engine::initialize();
     SDL_Manager& sdl = SDL_Manager::sdl();
-    sdl.spawnWindow("OpenGL Scene", 800, 600, SDL_TRUE);
-
+    
+    // Create window
+    const int windowWidth = 800;
+    const int windowHeight = 600;
+    sdl.spawnWindow("Breakout", windowWidth, windowHeight, SDL_TRUE);
+    
+    // Initialize OpenGL
     if (!initOpenGL()) return EXIT_FAILURE;
-
+    
+    // Set up shader
     Shader shader("../shader.vert", "../shader.frag");
     Renderer renderer;
+    
+    // Set up sound system
     SoundSystem soundSystem;
-
-    // Load and play the initial sound
-    int soundIndex = soundSystem.loadSound("../audio/synth.wav");
-    if (soundIndex == -1) {
-        std::cerr << "Failed to load initial sound.\n";
-    } else {
-        soundSystem.playSound(soundIndex);  // Play the loaded sound
-    }
-
-    // Load mesh
-    size_t triangleCount;
-    std::vector<float> vertexData;
-    if (!loadMeshData("../mesh.cse", triangleCount, vertexData)) return EXIT_FAILURE;
-
-    Shape cubeShape(triangleCount, vertexData);
     
-    // Create camera
-    Camera camera(60.0f, 800.0f / 600.0f, 0.1f, 100.0f);
-    camera.setPosition(glm::vec3(0.0f, 5.0f, 10.0f));
+    // Try to load sound effects (continue even if they fail)
+    soundSystem.loadSound("../audio/synth.wav");
+    soundSystem.loadSound("../audio/brick_hit.wav");
+    soundSystem.loadSound("../audio/wall_hit.wav");
+    soundSystem.loadSound("../audio/lose_life.wav");
+    
+    // Set up orthographic camera for 2D rendering
+    Camera camera;
+    camera.setPosition(glm::vec3(0.0f, 0.0f, 10.0f));
     camera.setTarget(glm::vec3(0.0f, 0.0f, 0.0f));
+    camera.setNearPlane(0.1f);
+    camera.setFarPlane(100.0f);
     
-    // Initialize Scene Graph with a large world bounds
-    AABB worldBounds(glm::vec3(-100.0f, -100.0f, -100.0f), glm::vec3(100.0f, 100.0f, 100.0f));
-    SceneGraph sceneGraph(worldBounds);
+    // Use orthographic projection for 2D
+    float aspectRatio = static_cast<float>(windowWidth) / windowHeight;
+    glm::mat4 projection = glm::ortho(-aspectRatio, aspectRatio, -1.0f, 1.0f, 0.1f, 100.0f);
     
-    // Create a bunch of cubes in the scene
-    std::vector<std::unique_ptr<RotatingCube>> cubes;
+    // Create game boundaries in normalized coordinates
+    float left = -aspectRatio;
+    float right = aspectRatio;
+    float bottom = -1.0f;
+    float top = 1.0f;
     
-    // Create parent node for a group of cubes
-    SceneNode* parentNode = sceneGraph.createNode();
-    parentNode->setLocalTransform(glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 2.0f, 0.0f)));
+    // Create Breakout game
+    Breakout game(soundSystem, left, right, top, bottom);
     
-    // Add center cube
-    auto centerCube = std::make_unique<RotatingCube>(
-        glm::vec3(0.0f, 0.0f, 0.0f),    // Position
-        Quaternion(0.0f, glm::vec3(0.0f, 1.0f, 0.0f)), // No initial rotation
-        cubeShape,                       // Shape
-        1,                                // ID
-        glm::vec3(0.0f, 1.0f, 0.0f),      // Rotation Axis (Y-axis)
-        45.0f                             // Rotation Speed (Degrees per second)
-    );
-    
-    // Add cube to scene graph (both hierarchy and spatial structure)
-    sceneGraph.addObject(centerCube.get(), sceneGraph.getRootNode());
-    cubes.push_back(std::move(centerCube));
-    
-    // Create a ring of cubes around the center
-    const int numCubes = 8;
-    const float radius = 5.0f;
-    
-    for (int i = 0; i < numCubes; i++) {
-        float angle = (float)i / numCubes * 2.0f * 3.14159f;
-        float x = radius * cos(angle);
-        float z = radius * sin(angle);
-        
-        // Create child node
-        SceneNode* childNode = sceneGraph.createNode(parentNode);
-        childNode->setLocalTransform(glm::translate(glm::mat4(1.0f), glm::vec3(x, 0.0f, z)));
-        
-        // Create cube with unique rotation axis
-        auto cube = std::make_unique<RotatingCube>(
-            glm::vec3(0.0f, 0.0f, 0.0f),    // Local position (will be transformed by node)
-            Quaternion(angle * 57.3f, glm::vec3(0.0f, 1.0f, 0.0f)), // Initial rotation
-            cubeShape,                       // Shape
-            i + 2,                           // ID
-            glm::normalize(glm::vec3(cos(angle), 1.0f, sin(angle))),  // Unique rotation axis
-            60.0f + i * 5.0f                 // Varying rotation speed
-        );
-        
-        // Add cube to scene graph
-        sceneGraph.addObject(cube.get(), childNode);
-        cubes.push_back(std::move(cube));
-    }
-    
-    // Update scene graph transformations
-    sceneGraph.updateTransforms();
-    
+    // Main game loop
     bool exit = false;
     SDL_Event e;
     
-    float cameraRotation = 0.0f;
-
+    // For input handling
+    bool leftPressed = false;
+    bool rightPressed = false;
+    
     while (!exit) {
+        // Update engine and delta time
         Engine::update();
         float dtSeconds = Engine::getDeltaSeconds();
         
-        // Clean up completed sounds to prevent memory issues
+        // Clean up completed sounds
         soundSystem.cleanup();
         
-        // Update all cubes
-        for (auto& cube : cubes) {
-            cube->update(dtSeconds);
-        }
-        
-        // Rotate camera around the scene
-        cameraRotation += dtSeconds * 0.2f; // Slow rotation
-        float camX = sin(cameraRotation) * 15.0f;
-        float camZ = cos(cameraRotation) * 15.0f;
-        camera.setPosition(glm::vec3(camX, 7.0f, camZ));
-        camera.updateMatrices();
-        
-        // Update scene graph spatial structure (in a real game, you might do this less frequently)
-        sceneGraph.updateSpatialStructure();
-        
-        // Process events
+        // Process SDL events
         while (SDL_PollEvent(&e)) {
-            if (e.type == SDL_QUIT) exit = true;
+            if (e.type == SDL_QUIT) {
+                exit = true;
+            }
+            
             if (e.type == SDL_WINDOWEVENT && e.window.event == SDL_WINDOWEVENT_CLOSE) {
                 sdl.closeWindow(e.window.windowID);
+                exit = true;
             }
+            
+            // Handle keyboard input
             if (e.type == SDL_KEYDOWN) {
-                if (e.key.keysym.sym == SDLK_SPACE) {
-                    std::cout << "Playing sound on SPACEBAR press...\n";
-                    soundSystem.playSound(soundIndex);
+                switch (e.key.keysym.sym) {
+                    case SDLK_LEFT:
+                        leftPressed = true;
+                        break;
+                    case SDLK_RIGHT:
+                        rightPressed = true;
+                        break;
+                    case SDLK_SPACE:
+                        // Space is handled in the handleInput function
+                        break;
+                    case SDLK_ESCAPE:
+                        exit = true;
+                        break;
+                }
+            } else if (e.type == SDL_KEYUP) {
+                switch (e.key.keysym.sym) {
+                    case SDLK_LEFT:
+                        leftPressed = false;
+                        break;
+                    case SDLK_RIGHT:
+                        rightPressed = false;
+                        break;
                 }
             }
         }
-
+        
+        // Handle input for the game
+        game.handleInput(dtSeconds, leftPressed, rightPressed, SDL_GetKeyboardState(NULL)[SDL_SCANCODE_SPACE]);
+        
+        // Update game logic
+        game.update(dtSeconds);
+        
+        // Clear screen
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         
-        // Render using the scene graph for efficient culling
-        sceneGraph.render(renderer, camera);
+        // Render game objects using the scene graph
+        game.getSceneGraph()->render(renderer, camera);
         
-        // Render the collected objects
-        glm::mat4 view = camera.getViewMatrix();
-        glm::mat4 proj = camera.getProjectionMatrix();
-        renderer.render(shader, view, proj);
+        // Render using our shader
+        renderer.render(shader, camera.getViewMatrix(), projection);
         
+        // Render UI text based on game state
+        if (game.getState() == GameState::Start) {
+            // Start screen
+            renderText("BREAKOUT", 0.0f, 0.2f, 1.0f);
+            renderText("Press SPACE to start", 0.0f, 0.0f, 0.5f);
+            renderText("Use LEFT/RIGHT to move paddle", 0.0f, -0.2f, 0.5f);
+        } else if (game.getState() == GameState::GameOver) {
+            // Game over screen
+            renderText("GAME OVER", 0.0f, 0.2f, 1.0f);
+            renderText("Final Score: " + std::to_string(game.getScore()), 0.0f, 0.0f, 0.5f);
+            renderText("Press SPACE to restart", 0.0f, -0.2f, 0.5f);
+        } else if (game.getState() == GameState::Win) {
+            // Win screen
+            renderText("YOU WIN!", 0.0f, 0.2f, 1.0f);
+            renderText("Final Score: " + std::to_string(game.getScore()), 0.0f, 0.0f, 0.5f);
+            renderText("Press SPACE to restart", 0.0f, -0.2f, 0.5f);
+        } else {
+            // In-game UI
+            renderText("Score: " + std::to_string(game.getScore()), -aspectRatio + 0.1f, top - 0.1f, 0.5f);
+            renderText("Lives: " + std::to_string(game.getLives()), aspectRatio - 0.3f, top - 0.1f, 0.5f);
+        }
+        
+        // Update window
         sdl.updateWindows();
+        
+        // Cap frame rate
         std::this_thread::sleep_for(1ms);
     }
-
+    
     return 0;
 }

@@ -21,6 +21,7 @@
                 "${fileDirname}/SoundSystem.cpp",
                 "${fileDirname}/Camera.cpp",
                 "${fileDirname}/SceneGraph.cpp",
+                "${fileDirname}/Breakout.cpp",
                 "${fileDirname}/Main.cpp",
                 "${fileDirname}/glew.c",
                 "-I${fileDirname}/../include",

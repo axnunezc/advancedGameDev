@@ -17,6 +17,10 @@ public:
     Shape(const size_t triangleCount, const std::vector<float>& vertexData);
     ~Shape();
 
+    Shape(const Shape& other);
+
+    Shape& operator=(const Shape& other);
+
     void bind() const;
     void unbind() const;
     GLsizei getVertexCount() const { return static_cast<GLsizei>(pos.size()); }
