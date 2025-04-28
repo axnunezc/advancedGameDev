@@ -1,79 +1,80 @@
 #ifndef SCENEGRAPH_HPP
 #define SCENEGRAPH_HPP
 
-// Enable experimental GLM features
-#define GLM_ENABLE_EXPERIMENTAL
-
+#include "CollisionResponder.hpp"
 #include "GameObject.hpp"
-#include "Camera.hpp"  // Include the full Camera definition
-#include <vector>
+#include "AABB.hpp"
+#include "Camera.hpp"
 #include <memory>
-#include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
+#include <vector>
 #include <functional>
+#include <glm/glm.hpp>
 
-// Forward declaration for Renderer (if not needed in header)
+// Forward declarations
 class Renderer;
+class Frustum;
+class SceneNode;
+class OctreeNode;
 
-// Axis-Aligned Bounding Box
-struct AABB {
-    glm::vec3 min;
-    glm::vec3 max;
-    
-    AABB() : min(0.0f), max(0.0f) {}
-    AABB(const glm::vec3& min, const glm::vec3& max) : min(min), max(max) {}
-    
-    bool contains(const glm::vec3& point) const {
-        return (point.x >= min.x && point.x <= max.x &&
-                point.y >= min.y && point.y <= max.y &&
-                point.z >= min.z && point.z <= max.z);
-    }
-    
-    bool intersects(const AABB& other) const {
-        return (min.x <= other.max.x && max.x >= other.min.x &&
-                min.y <= other.max.y && max.y >= other.min.y &&
-                min.z <= other.max.z && max.z >= other.min.z);
-    }
-    
-    glm::vec3 getCenter() const {
-        return (min + max) * 0.5f;
-    }
-    
-    glm::vec3 getExtents() const {
-        return (max - min) * 0.5f;
-    }
-};
-
-// Frustum for view culling
+// Frustum class for view frustum culling
 class Frustum {
-private:
-    enum Planes {
+public:
+    enum PlaneID {
+        Left = 0,
+        Right,
+        Bottom,
+        Top,
         Near,
         Far,
-        Left,
-        Right,
-        Top,
-        Bottom,
         PlaneCount
     };
     
-    glm::vec4 planes[PlaneCount]; // Ax + By + Cz + D = 0
-    
-public:
-    Frustum() {}
+    glm::vec4 planes[PlaneCount];
     
     void updateFromCamera(const Camera& camera);
-    
     bool containsPoint(const glm::vec3& point) const;
     bool containsSphere(const glm::vec3& center, float radius) const;
     bool containsAABB(const AABB& aabb) const;
 };
 
-// Scene Node for hierarchical transformations
+// Scene node class
 class SceneNode {
+public:
+    SceneNode();
+    
+    // Transform functions
+    void setLocalTransform(const glm::mat4& transform);
+    const glm::mat4& getLocalTransform() const;
+    const glm::mat4& getWorldTransform();
+    void updateWorldTransform();
+    
+    // Bounds functions
+    void updateWorldBounds();
+    const AABB& getWorldBounds();
+    void setLocalBounds(const AABB& bounds);
+    const AABB& getLocalBounds() const;
+    
+    // Hierarchy functions
+    void addChild(std::unique_ptr<SceneNode> child);
+    std::unique_ptr<SceneNode> removeChild(SceneNode* child);
+    void setParent(SceneNode* parent);
+    SceneNode* getParent() const;
+    
+    // Object functions
+    void attachObject(GameObject* obj);
+    void detachObject(GameObject* obj);
+    const std::vector<GameObject*>& getObjects() const;
+    
+    // Rendering functions
+    void render(Renderer& renderer, const Frustum& frustum);
+    void update(float deltaTime);
+    void collectVisibleObjects(std::vector<GameObject*>& visibleObjects, const Frustum& frustum);
+    
+    // Child nodes
+    std::vector<std::unique_ptr<SceneNode>> children;
+    
 private:
     SceneNode* parent;
-    std::vector<GameObject*> objects;
     
     glm::mat4 localTransform;
     glm::mat4 worldTransform;
@@ -83,59 +84,16 @@ private:
     AABB worldBounds;
     bool boundsDirty;
     
-public:
-    std::vector<std::unique_ptr<SceneNode>> children; // Made public for convenience
-    
-    SceneNode();
-    ~SceneNode() = default;
-    
-    // Transform operations
-    void setLocalTransform(const glm::mat4& transform);
-    const glm::mat4& getLocalTransform() const;
-    const glm::mat4& getWorldTransform();
-    void updateWorldTransform();
-    
-    // Bounds operations
-    void updateWorldBounds();
-    const AABB& getWorldBounds();
-    void setLocalBounds(const AABB& bounds);
-    const AABB& getLocalBounds() const;
-    
-    // Hierarchy management
-    void addChild(std::unique_ptr<SceneNode> child);
-    std::unique_ptr<SceneNode> removeChild(SceneNode* child);
-    void setParent(SceneNode* parent);
-    SceneNode* getParent() const;
-    
-    // Object management
-    void attachObject(GameObject* obj);
-    void detachObject(GameObject* obj);
-    const std::vector<GameObject*>& getObjects() const;
-    
-    // Scene traversal
-    void render(Renderer& renderer, const Frustum& frustum);
-    void update(float deltaTime);
-    void collectVisibleObjects(std::vector<GameObject*>& visibleObjects, const Frustum& frustum);
+    std::vector<GameObject*> objects;
 };
 
 // Octree node for spatial partitioning
 class OctreeNode {
-private:
-    AABB bounds;
-    std::unique_ptr<OctreeNode> children[8];
-    std::vector<GameObject*> objects;
-    int maxDepth;
-    int currentDepth;
-    int maxObjectsPerNode;
-    bool isLeaf;
-    OctreeNode* parent;  // Added parent pointer
+public:
+    OctreeNode(const AABB& bounds, int maxDepth = 8, int maxObjects = 10, int currentDepth = 0, OctreeNode* parent = nullptr);
     
     void split();
     int getOctantForPoint(const glm::vec3& point) const;
-    
-public:
-    OctreeNode(const AABB& bounds, int maxDepth = 8, int maxObjects = 16, int currentDepth = 0, OctreeNode* parent = nullptr);
-    ~OctreeNode() = default;
     
     void insert(GameObject* obj);
     void remove(GameObject* obj);
@@ -145,37 +103,63 @@ public:
     void clear();
     
     const AABB& getBounds() const;
+    bool isLeaf() const { return leafNode; }
+    OctreeNode* getChild(int index) const { return children[index].get(); }
+    const std::vector<GameObject*>& getObjects() const { return objects; }
+    void OctreeNode_findPotentialCollisions(OctreeNode* node, GameObject* obj, std::vector<GameObject*>& potentialCollisions);
+    
+private:
+    AABB bounds;
+    int maxDepth;
+    int currentDepth;
+    int maxObjectsPerNode;
+    bool leafNode;
+    
+    OctreeNode* parent;
+    std::unique_ptr<OctreeNode> children[8];
+    
+    std::vector<GameObject*> objects;
 };
 
-// Main Scene Graph class
+// Main scene graph class
 class SceneGraph {
+public:
+    SceneGraph(const AABB& worldBounds = AABB(glm::vec3(-100.0f), glm::vec3(100.0f)));
+    
+    void addObject(GameObject* obj, SceneNode* parent = nullptr);
+    void removeObject(GameObject* obj);
+    
+    void updateTransforms();
+    
+    // Update the spatial structure (rebuild octree)
+    void updateSpatialStructure();
+    
+    // Update all objects in the scene
+    void updateSpatialStructure(float deltaTime);
+    
+    // Update a specific object in the scene
+    void updateObject(GameObject* obj);
+    
+    void render(Renderer& renderer, const Camera& camera);
+    
+    SceneNode* createNode(SceneNode* parent = nullptr);
+    void destroyNode(SceneNode* node);
+    
+    SceneNode* getRootNode() const;
+    
+    void getVisibleObjects(std::vector<GameObject*>& visibleObjects, const Camera& camera);
+    
+    // Collision detection methods
+    void detectCollisions(std::vector<std::pair<GameObject*, GameObject*>>& collisions);
+    void detectCollisions(GameObject* obj, std::vector<GameObject*>& collidingObjects);
+    void registerCollisionCallback(int typeA, int typeB, CollisionCallback callback);
+    void processCollisionResponses();
+    
 private:
     std::unique_ptr<SceneNode> rootNode;
     std::unique_ptr<OctreeNode> octreeRoot;
     AABB worldBounds;
-    
-public:
-    SceneGraph(const AABB& worldBounds);
-    ~SceneGraph() = default;
-    
-    // Scene operations
-    void addObject(GameObject* obj, SceneNode* parent = nullptr);
-    void removeObject(GameObject* obj);
-    void updateTransforms();
-    
-    // Rendering
-    void render(Renderer& renderer, const Camera& camera);
-    
-    // Scene management
-    SceneNode* createNode(SceneNode* parent = nullptr);
-    void destroyNode(SceneNode* node);
-    SceneNode* getRootNode() const;
-    
-    // Queries
-    void getVisibleObjects(std::vector<GameObject*>& visibleObjects, const Camera& camera);
-    
-    // Spatial update
-    void updateSpatialStructure();
+    CollisionResponder collisionResponder;
 };
 
 #endif // SCENEGRAPH_HPP

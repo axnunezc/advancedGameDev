@@ -6,6 +6,8 @@
 #include <fstream>
 #include <sstream>
 #include <GL/glew.h>
+#include <glm/glm.hpp>
+#include <glm/gtc/type_ptr.hpp>
 
 class Shader {
 public:
@@ -22,6 +24,8 @@ public:
 
     // Destructor: Cleanup shader program
     ~Shader() { glDeleteProgram(program); }
+
+    void setMatrix4(const std::string& name, const glm::mat4& mat);
 };
 
 #endif // SHADER_HPP

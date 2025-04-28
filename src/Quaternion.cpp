@@ -1,16 +1,22 @@
 #include "Quaternion.hpp"
 
-// Constructor: Creates a quaternion from axis-angle
+// Angle-axis constructor
 Quaternion::Quaternion(float angle, glm::vec3 axis) {
-    axis = glm::normalize(axis); // Ensure axis is unit-length
-    float halfAngle = glm::radians(angle) / 2.0f;
-    float s = std::sin(halfAngle);
-
-    w = std::cos(halfAngle);
+    axis = glm::normalize(axis);
+    float halfAngle = glm::radians(angle) * 0.5f;
+    float s = sin(halfAngle);
+    
+    w = cos(halfAngle);
     x = axis.x * s;
     y = axis.y * s;
     z = axis.z * s;
+    
+    normalize();
+}
 
+// Raw components constructor
+Quaternion::Quaternion(float w, float x, float y, float z)
+    : w(w), x(x), y(y), z(z) {
     normalize();
 }
 
@@ -18,11 +24,9 @@ Quaternion::Quaternion(float angle, glm::vec3 axis) {
 Quaternion Quaternion::operator*(const Quaternion& q) const {
     return Quaternion(
         w * q.w - x * q.x - y * q.y - z * q.z,
-        glm::vec3(
-            w * q.x + x * q.w + y * q.z - z * q.y,
-            w * q.y - x * q.z + y * q.w + z * q.x,
-            w * q.z + x * q.y - y * q.x + z * q.w
-        )
+        w * q.x + x * q.w + y * q.z - z * q.y,
+        w * q.y - x * q.z + y * q.w + z * q.x,
+        w * q.z + x * q.y - y * q.x + z * q.w
     );
 }
 
@@ -72,4 +76,15 @@ glm::vec3 Quaternion::getAxis() const {
 // Debug print function
 void Quaternion::print() const {
     std::cout << "Quaternion(" << w << ", " << x << ", " << y << ", " << z << ")\n";
+}
+
+glm::vec3 Quaternion::rotate(const glm::vec3& v) const {
+    // Convert quaternion to rotation matrix and apply to vector
+    return glm::mat3_cast(glm::quat(w, x, y, z)) * v;
+}
+
+glm::vec3 Quaternion::inverseRotate(const glm::vec3& v) const {
+    // Create inverse quaternion and use it to rotate
+    Quaternion inverse(w, -x, -y, -z);
+    return inverse.rotate(v);
 }

@@ -1,5 +1,4 @@
 #include "PhysicsIntegrator.hpp"
-#include "GameObject.hpp"
 #include <iostream>
 
 // Define GLM_ENABLE_EXPERIMENTAL before including experimental GLM headers
@@ -17,24 +16,25 @@ namespace Physics {
     }
 
     Quaternion integrateAngular(float deltaTime, const glm::vec3& angular) {
-        // Integrate angular velocity to produce a quaternion rotation
-        // Using the formula q = (cos(|ω|/2), (ω/|ω|) * sin(|ω|/2)) where ω = Δt * angular
-        glm::vec3 omega = angular * deltaTime;
-        float magnitude = glm::length(omega);
+        // angular is in degrees per second, convert to radians for calculation
+        glm::vec3 angularRad = glm::radians(angular);
         
-        // For very small rotations, return identity quaternion
-        if (magnitude < 0.0001f) {
-            return Quaternion(0.0f, glm::vec3(0.0f, 0.0f, 1.0f));
+        // Calculate rotation angle in radians for this time step
+        float angle = glm::length(angularRad) * deltaTime;
+        
+        // If rotation is too small, return identity quaternion
+        if (angle < 0.0001f) {
+            return Quaternion(0.0f, glm::vec3(0.0f, 1.0f, 0.0f)); // Identity quaternion (0 degrees around any axis)
         }
         
-        // Normalize omega to get axis
-        glm::vec3 axis = omega / magnitude;
+        // Get rotation axis
+        glm::vec3 axis = glm::normalize(angularRad);
         
-        // Return quaternion
-        return Quaternion(
-            glm::degrees(magnitude), // Convert radians to degrees for the angle
-            axis
-        );
+        // Convert back to degrees for the Quaternion constructor
+        float angleDegrees = glm::degrees(angle);
+        
+        // Return the rotation quaternion
+        return Quaternion(angleDegrees, axis);
     }
 
     void integrateAcceleration(GameObject* obj, float deltaTime, const glm::vec3& accel) {
@@ -68,6 +68,10 @@ namespace Physics {
     void updateObject(GameObject* obj, float deltaTime, bool applyGravity) {
         if (!obj || obj->isStatic) return;
         
+        // Store original position and rotation for change detection
+        glm::vec3 originalPos = obj->position;
+        Quaternion originalRot = obj->rotation;
+        
         // Apply gravity if requested
         if (applyGravity) {
             integrateAcceleration(obj, deltaTime, gravity);
@@ -80,11 +84,17 @@ namespace Physics {
         if (glm::length(obj->angularVelocity) > 0.0001f) {
             Quaternion rotationDelta = integrateAngular(deltaTime, obj->angularVelocity);
             obj->rotation = rotationDelta * obj->rotation;
+            obj->rotation.normalize();
         }
         
         // Update the model matrix with new position and rotation
         obj->modelMatrix = glm::translate(glm::mat4(1.0f), obj->position) * 
-                           obj->rotation.toMatrix();
+                          obj->rotation.toMatrix();
+        
+        // Mark bounds as dirty if position or rotation changed
+        if (originalPos != obj->position || originalRot != obj->rotation) {
+            obj->markBoundsDirty();
+        }
     }
     
     void runPhysicsTest() {

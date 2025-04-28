@@ -24,4 +24,4 @@ public:
     void render(Shader& shader, const glm::mat4& view, const glm::mat4& proj);
 };
 
-#endif
+#endif // RENDERER_HPP

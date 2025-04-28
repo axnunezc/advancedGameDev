@@ -39,16 +39,50 @@ void Renderer::render(Shader& shader, const glm::mat4& view, const glm::mat4& pr
     glUniformMatrix4fv(viewLoc, 1, GL_FALSE, glm::value_ptr(view));
 
     for (auto object : renderQueue) {
+        // Bind the object's VAO and VBO for rendering
         glBindVertexArray(object->getVAO());
         glBindBuffer(GL_ARRAY_BUFFER, object->getVBO());
 
+        // Set model matrix uniform
         glm::mat4 model = object->getModelMatrix();
-
         GLint modelLoc = shader.getUniform("model");
         glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
 
-        glDrawArrays(GL_TRIANGLES, 0, object->getVertexCount());
+        // Check if object has an armature and set appropriate uniforms
+        if (object->hasAnimatableSkeleton()) {
+            // Set bone matrices in shader if the uniform exists
+            GLint hasArmatureLoc = shader.getUniform("hasArmature");
+            if (hasArmatureLoc != -1) {
+                glUniform1i(hasArmatureLoc, GL_TRUE);
+                
+                // Get bone count and matrices
+                const auto& boneMatrices = object->getBoneMatrices();
+                GLint boneCountLoc = shader.getUniform("boneCount");
+                if (boneCountLoc != -1) {
+                    glUniform1i(boneCountLoc, static_cast<int>(boneMatrices.size()));
+                }
+                
+                // Upload bone matrices to shader
+                for (size_t i = 0; i < boneMatrices.size(); i++) {
+                    std::string uniformName = "boneMatrices[" + std::to_string(i) + "]";
+                    GLint matrixLoc = shader.getUniform(uniformName.c_str());
+                    if (matrixLoc != -1) {
+                        glUniformMatrix4fv(matrixLoc, 1, GL_FALSE, glm::value_ptr(boneMatrices[i]));
+                    }
+                }
+            }
+        } else {
+            // Set hasArmature to false if the uniform exists
+            GLint hasArmatureLoc = shader.getUniform("hasArmature");
+            if (hasArmatureLoc != -1) {
+                glUniform1i(hasArmatureLoc, GL_FALSE);
+            }
+        }
 
+        // Draw the object
+        glDrawArrays(GL_TRIANGLES, 0, object->getVertexCount());
+        
+        // Clean up
         glBindVertexArray(0);
     }
 

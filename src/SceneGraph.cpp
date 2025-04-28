@@ -3,6 +3,8 @@
 #include "Renderer.hpp"
 #include <algorithm>
 #include <iostream>
+
+#define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtx/norm.hpp>
 
@@ -207,14 +209,12 @@ void SceneNode::updateWorldBounds() {
     
     // Include attached objects
     for (auto* obj : objects) {
-        // Extract position from model matrix instead of using getPosition()
-        glm::mat4 objMatrix = obj->getModelMatrix();
-        glm::vec3 objPos(objMatrix[3][0], objMatrix[3][1], objMatrix[3][2]);
+        // Get the object's bounding box - this will calculate it if needed
+        const AABB& objBounds = obj->getBoundingBox();
         
-        float objRadius = 1.0f; // Use a default radius or calculate from shape if available
-        
-        worldBounds.min = glm::min(worldBounds.min, objPos - glm::vec3(objRadius));
-        worldBounds.max = glm::max(worldBounds.max, objPos + glm::vec3(objRadius));
+        // Merge with node bounds
+        worldBounds.min = glm::min(worldBounds.min, objBounds.min);
+        worldBounds.max = glm::max(worldBounds.max, objBounds.max);
     }
     
     boundsDirty = false;
@@ -325,9 +325,14 @@ void SceneNode::collectVisibleObjects(std::vector<GameObject*>& visibleObjects, 
         return;
     }
     
-    // Add all attached objects
+    // Add all attached objects that are within frustum
     for (auto* obj : objects) {
-        visibleObjects.push_back(obj);
+        // Get up-to-date bounding box
+        const AABB& objBounds = obj->getBoundingBox();
+        
+        if (frustum.containsAABB(objBounds)) {
+            visibleObjects.push_back(obj);
+        }
     }
     
     // Process all children
@@ -343,14 +348,14 @@ OctreeNode::OctreeNode(const AABB& bounds, int maxDepth, int maxObjects, int cur
       maxDepth(maxDepth),
       currentDepth(currentDepth),
       maxObjectsPerNode(maxObjects),
-      isLeaf(true),
+      leafNode(true),
       parent(parent) {
 }
 
 void OctreeNode::split() {
-    if (!isLeaf) return;
+    if (!leafNode) return;
     
-    isLeaf = false;
+    leafNode = false;
     
     glm::vec3 center = bounds.getCenter();
     glm::vec3 extents = bounds.getExtents();
@@ -373,11 +378,11 @@ void OctreeNode::split() {
     
     // Redistribute objects to children
     for (auto* obj : objects) {
-        // Extract position from model matrix instead of using getPosition()
-        glm::mat4 objMatrix = obj->getModelMatrix();
-        glm::vec3 pos(objMatrix[3][0], objMatrix[3][1], objMatrix[3][2]);
+        // Get up-to-date bounding box
+        const AABB& objBounds = obj->getBoundingBox();
+        glm::vec3 objCenter = objBounds.getCenter();
         
-        int octant = getOctantForPoint(pos);
+        int octant = getOctantForPoint(objCenter);
         if (octant >= 0) {
             children[octant]->insert(obj);
         }
@@ -387,11 +392,11 @@ void OctreeNode::split() {
     // We only keep objects that don't fit in a single child
     std::vector<GameObject*> remainingObjects;
     for (auto* obj : objects) {
-        // Extract position from model matrix
-        glm::mat4 objMatrix = obj->getModelMatrix();
-        glm::vec3 pos(objMatrix[3][0], objMatrix[3][1], objMatrix[3][2]);
+        // Get up-to-date bounding box
+        const AABB& objBounds = obj->getBoundingBox();
+        glm::vec3 objCenter = objBounds.getCenter();
         
-        int octant = getOctantForPoint(pos);
+        int octant = getOctantForPoint(objCenter);
         if (octant < 0) {
             remainingObjects.push_back(obj);
         }
@@ -417,17 +422,16 @@ int OctreeNode::getOctantForPoint(const glm::vec3& point) const {
 }
 
 void OctreeNode::insert(GameObject* obj) {
-    // Extract position from model matrix
-    glm::mat4 objMatrix = obj->getModelMatrix();
-    glm::vec3 pos(objMatrix[3][0], objMatrix[3][1], objMatrix[3][2]);
+    // Get up-to-date bounding box
+    const AABB& objBounds = obj->getBoundingBox();
     
     // Check if this object fits in this node
-    if (!bounds.contains(pos)) {
+    if (!bounds.overlaps(objBounds)) {
         return;
     }
     
     // If we're a leaf and below capacity, add the object here
-    if (isLeaf) {
+    if (leafNode) {
         objects.push_back(obj);
         
         // Check if we should split
@@ -438,26 +442,20 @@ void OctreeNode::insert(GameObject* obj) {
     }
     
     // Otherwise, try to add to a child
-    int octant = getOctantForPoint(pos);
+    // Get center of object bounds
+    glm::vec3 objCenter = objBounds.getCenter();
+    int octant = getOctantForPoint(objCenter);
+    
     if (octant >= 0) {
         children[octant]->insert(obj);
     } else {
-        // Object is on a boundary, keep it in this node
+        // Object is on a boundary or spans multiple octants, keep it in this node
         objects.push_back(obj);
     }
 }
 
 void OctreeNode::remove(GameObject* obj) {
-    // Extract position from model matrix
-    glm::mat4 objMatrix = obj->getModelMatrix();
-    glm::vec3 pos(objMatrix[3][0], objMatrix[3][1], objMatrix[3][2]);
-    
-    // Check if this object could be in this node
-    if (!bounds.contains(pos)) {
-        return;
-    }
-    
-    // Try to remove from this node's objects
+    // Find and remove from this node's objects
     auto it = std::find(objects.begin(), objects.end(), obj);
     if (it != objects.end()) {
         objects.erase(it);
@@ -465,12 +463,16 @@ void OctreeNode::remove(GameObject* obj) {
     }
     
     // If not found and not a leaf, try to remove from children
-    if (!isLeaf) {
-        int octant = getOctantForPoint(pos);
+    if (!leafNode) {
+        // Get the object's bounds
+        const AABB& objBounds = obj->getBoundingBox();
+        glm::vec3 objCenter = objBounds.getCenter();
+        
+        int octant = getOctantForPoint(objCenter);
         if (octant >= 0) {
             children[octant]->remove(obj);
         } else {
-            // Object is on a boundary, try all children
+            // Object could be in any child, check all
             for (int i = 0; i < 8; ++i) {
                 children[i]->remove(obj);
             }
@@ -479,13 +481,12 @@ void OctreeNode::remove(GameObject* obj) {
 }
 
 void OctreeNode::update(GameObject* obj) {
-    // Extract position from model matrix
-    glm::mat4 objMatrix = obj->getModelMatrix();
-    glm::vec3 pos(objMatrix[3][0], objMatrix[3][1], objMatrix[3][2]);
+    // Get up-to-date bounding box
+    const AABB& objBounds = obj->getBoundingBox();
     
-    // Check if the object is still in this node
-    if (bounds.contains(pos)) {
-        // Remove and reinsert
+    // Check if the object still belongs in this node
+    if (bounds.overlaps(objBounds)) {
+        // Remove and reinsert to update position within octree
         remove(obj);
         insert(obj);
     } else if (parent) {
@@ -500,13 +501,18 @@ void OctreeNode::collectVisibleObjects(std::vector<GameObject*>& visibleObjects,
         return;
     }
     
-    // Add all objects in this node
+    // Add all objects in this node that are within the frustum
     for (auto* obj : objects) {
-        visibleObjects.push_back(obj);
+        // Get up-to-date bounding box
+        const AABB& objBounds = obj->getBoundingBox();
+        
+        if (frustum.containsAABB(objBounds)) {
+            visibleObjects.push_back(obj);
+        }
     }
     
     // Recursively check children if not a leaf
-    if (!isLeaf) {
+    if (!leafNode) {
         for (int i = 0; i < 8; ++i) {
             children[i]->collectVisibleObjects(visibleObjects, frustum);
         }
@@ -516,7 +522,7 @@ void OctreeNode::collectVisibleObjects(std::vector<GameObject*>& visibleObjects,
 void OctreeNode::clear() {
     objects.clear();
     
-    if (!isLeaf) {
+    if (!leafNode) {
         for (int i = 0; i < 8; ++i) {
             children[i]->clear();
         }
@@ -576,6 +582,9 @@ void SceneGraph::removeObject(GameObject* obj) {
 
 void SceneGraph::updateTransforms() {
     rootNode->updateWorldTransform();
+    
+    // After updating transforms, update bounds
+    rootNode->updateWorldBounds();
 }
 
 void SceneGraph::render(Renderer& renderer, const Camera& camera) {
@@ -646,4 +655,146 @@ void SceneGraph::updateSpatialStructure() {
     };
     
     addNodeObjects(rootNode.get());
+}
+
+// Update objects in the scene - call this per frame
+void SceneGraph::updateSpatialStructure(float deltaTime) {
+    // First, update all objects in the scene hierarchy
+    std::function<void(SceneNode*, float)> updateNode = [&](SceneNode* node, float dt) {
+        // Update all objects attached to this node
+        for (auto* obj : node->getObjects()) {
+            obj->update(dt);
+            
+            // After object is updated, update its position in the octree
+            if (octreeRoot) {
+                octreeRoot->update(obj);
+            }
+        }
+        
+        // Process children recursively
+        for (const auto& child : node->children) {
+            updateNode(child.get(), dt);
+        }
+    };
+    
+    updateNode(rootNode.get(), deltaTime);
+    
+    // Update all node bounds in the hierarchy (bottom-up)
+    rootNode->updateWorldBounds();
+}
+
+// Update a specific object in the scene (call this when an object moves through means other than physics)
+void SceneGraph::updateObject(GameObject* obj) {
+    // Update the object in the octree
+    octreeRoot->update(obj);
+    
+    // Mark parent node bounds as dirty
+    // Find the parent node containing this object
+    std::function<SceneNode*(SceneNode*, GameObject*)> findParentNode = [&](SceneNode* node, GameObject* object) -> SceneNode* {
+        // Check if this node contains the object
+        auto it = std::find(node->getObjects().begin(), node->getObjects().end(), object);
+        if (it != node->getObjects().end()) {
+            return node;
+        }
+        
+        // Check children
+        for (auto& child : node->children) {
+            SceneNode* result = findParentNode(child.get(), object);
+            if (result) {
+                return result;
+            }
+        }
+        
+        return nullptr;
+    };
+    
+    SceneNode* parentNode = findParentNode(rootNode.get(), obj);
+    if (parentNode) {
+        parentNode->updateWorldBounds();
+    }
+ }
+ 
+ // New collision detection methods
+ void SceneGraph::detectCollisions(std::vector<std::pair<GameObject*, GameObject*>>& collisions) {
+    // Get all objects in the scene
+    std::vector<GameObject*> allObjects;
+    
+    // Helper function to collect all objects from scene hierarchy
+    std::function<void(SceneNode*)> collectObjects = [&](SceneNode* node) {
+        // Add objects from this node
+        for (auto* obj : node->getObjects()) {
+            allObjects.push_back(obj);
+        }
+        
+        // Process children
+        for (const auto& child : node->children) {
+            collectObjects(child.get());
+        }
+    };
+    
+    collectObjects(rootNode.get());
+    
+    // Use octree to accelerate collision detection
+    for (auto* obj : allObjects) {
+        std::vector<GameObject*> potentialCollisions;
+        detectCollisions(obj, potentialCollisions);
+        
+        // For each potential collision, create a collision pair
+        for (auto* other : potentialCollisions) {
+            // Avoid duplicate pairs by ensuring obj < other
+            if (obj < other) {
+                collisions.push_back(std::make_pair(obj, other));
+            }
+        }
+    }
+ }
+ 
+ void SceneGraph::detectCollisions(GameObject* obj, std::vector<GameObject*>& collidingObjects) {
+    // Get object's bounding box
+    const AABB& objBounds = obj->getBoundingBox();
+    
+    // Helper function to recursively check octree nodes
+    std::function<void(OctreeNode*, const AABB&)> checkNode = 
+        [&](OctreeNode* node, const AABB& bounds) {
+            // Early out if node bounds don't overlap with object bounds
+            if (!node->getBounds().overlaps(bounds)) {
+                return;
+            }
+            
+            // Check all objects in this node
+            for (auto* other : node->getObjects()) {
+                // Skip self
+                if (other == obj) {
+                    continue;
+                }
+                
+                // Check if bounding boxes overlap
+                if (bounds.overlaps(other->getBoundingBox())) {
+                    collidingObjects.push_back(other);
+                }
+            }
+            
+            // Check children if not a leaf node
+            if (!node->isLeaf()) {
+                for (int i = 0; i < 8; ++i) {
+                    checkNode(node->getChild(i), bounds);
+                }
+            }
+        };
+    
+    // Start checking from octree root
+    checkNode(octreeRoot.get(), objBounds);
+ }
+
+ void SceneGraph::registerCollisionCallback(int typeA, int typeB, CollisionCallback callback) {
+    collisionResponder.registerCallback(typeA, typeB, callback);
+}
+
+void SceneGraph::processCollisionResponses() {
+    std::vector<std::pair<GameObject*, GameObject*>> collisions;
+    detectCollisions(collisions);
+    
+    for (const auto& collision : collisions) {
+        collisionResponder.processCollision(collision.first, collision.second);
+    }
 }
